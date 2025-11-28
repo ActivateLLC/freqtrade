@@ -428,6 +428,32 @@ class ForceExitPayload(BaseModel):
     amount: float | None = None
 
 
+class ForceSpreadPayload(BaseModel):
+    """Payload for forcing an options spread entry via the UI."""
+
+    pair: str
+    spread_type: str  # bull_call, bear_put, bull_put, bear_call
+    expiry_date: str  # Format: YYMMDD or YYYY-MM-DD
+    long_strike: float  # Strike price for long leg
+    short_strike: float  # Strike price for short leg
+    stakeamount: float | None = None
+    ordertype: OrderTypeValues | None = None
+    entry_tag: str | None = None
+
+
+class ForceSpreadResponse(BaseModel):
+    """Response for force spread entry."""
+
+    status: str
+    spread_type: str | None = None
+    pair: str | None = None
+    long_leg: dict | None = None
+    short_leg: dict | None = None
+    expiry_date: str | None = None
+    max_profit: float | None = None
+    max_loss: float | None = None
+
+
 class BlacklistPayload(BaseModel):
     blacklist: list[str]
 

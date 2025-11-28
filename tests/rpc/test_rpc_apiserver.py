@@ -1865,6 +1865,75 @@ def test_api_forceexit(botclient, mocker, ticker, fee, markets):
     assert trade.is_open is False
 
 
+def test_api_forcespread(botclient, mocker):
+    """Test force spread endpoint for options spread trading."""
+    ftbot, client = botclient
+
+    # Test without force_entry_enable
+    rc = client_post(
+        client,
+        f"{BASE_URI}/forcespread",
+        data={
+            "pair": "BTC/USD",
+            "spread_type": "bull_call",
+            "expiry_date": "250131",
+            "long_strike": 50000,
+            "short_strike": 52000,
+        },
+    )
+    assert_response(rc, 502)
+    assert "Force_entry not enabled" in rc.json()["error"]
+
+    # Enable force_entry
+    ftbot.config["force_entry_enable"] = True
+
+    # Test with wrong trading mode (not OPTIONS)
+    rc = client_post(
+        client,
+        f"{BASE_URI}/forcespread",
+        data={
+            "pair": "BTC/USD",
+            "spread_type": "bull_call",
+            "expiry_date": "250131",
+            "long_strike": 50000,
+            "short_strike": 52000,
+        },
+    )
+    assert_response(rc, 502)
+    assert "trading_mode='options'" in rc.json()["error"]
+
+    # Test with invalid spread type
+    ftbot.config["trading_mode"] = TradingMode.OPTIONS
+    rc = client_post(
+        client,
+        f"{BASE_URI}/forcespread",
+        data={
+            "pair": "BTC/USD",
+            "spread_type": "invalid_spread",
+            "expiry_date": "250131",
+            "long_strike": 50000,
+            "short_strike": 52000,
+        },
+    )
+    assert_response(rc, 502)
+    assert "Invalid spread_type" in rc.json()["error"]
+
+    # Test with negative strike
+    rc = client_post(
+        client,
+        f"{BASE_URI}/forcespread",
+        data={
+            "pair": "BTC/USD",
+            "spread_type": "bull_call",
+            "expiry_date": "250131",
+            "long_strike": -50000,
+            "short_strike": 52000,
+        },
+    )
+    assert_response(rc, 502)
+    assert "Strike prices must be positive" in rc.json()["error"]
+
+
 def gen_annotation_params():
     area_annotation = {
         "type": "area",

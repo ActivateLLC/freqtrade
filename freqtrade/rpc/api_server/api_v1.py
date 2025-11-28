@@ -26,6 +26,8 @@ from freqtrade.rpc.api_server.api_schemas import (
     ForceEnterPayload,
     ForceEnterResponse,
     ForceExitPayload,
+    ForceSpreadPayload,
+    ForceSpreadResponse,
     FreqAIModelListResponse,
     Health,
     HyperoptLossListResponse,
@@ -91,7 +93,8 @@ logger = logging.getLogger(__name__)
 # 2.41: Add download-data endpoint
 # 2.42: Add /pair_history endpoint with live data
 # 2.43: Add /profit_all endpoint
-API_VERSION = 2.43
+# 2.44: Add /forcespread endpoint for options spread trading
+API_VERSION = 2.44
 
 # Public API, requires no auth.
 router_public = APIRouter()
@@ -325,6 +328,33 @@ def force_entry(payload: ForceEnterPayload, rpc: RPC = Depends(get_rpc)):
 def forceexit(payload: ForceExitPayload, rpc: RPC = Depends(get_rpc)):
     ordertype = payload.ordertype.value if payload.ordertype else None
     return rpc._rpc_force_exit(str(payload.tradeid), ordertype, amount=payload.amount)
+
+
+@router.post("/forcespread", response_model=ForceSpreadResponse, tags=["trading", "options"])
+def force_spread(payload: ForceSpreadPayload, rpc: RPC = Depends(get_rpc)):
+    """
+    Force enter an options spread position.
+
+    Supports vertical spreads:
+    - bull_call: Buy lower strike call, sell higher strike call
+    - bear_put: Buy higher strike put, sell lower strike put
+    - bull_put: Sell higher strike put, buy lower strike put (credit spread)
+    - bear_call: Sell lower strike call, buy higher strike call (credit spread)
+    """
+    ordertype = payload.ordertype.value if payload.ordertype else None
+
+    result = rpc._rpc_force_spread(
+        pair=payload.pair,
+        spread_type=payload.spread_type,
+        expiry_date=payload.expiry_date,
+        long_strike=payload.long_strike,
+        short_strike=payload.short_strike,
+        stake_amount=payload.stakeamount,
+        order_type=ordertype,
+        enter_tag=payload.entry_tag or "force_spread",
+    )
+
+    return ForceSpreadResponse.model_validate(result)
 
 
 @router.get("/blacklist", response_model=BlacklistResponse, tags=["info", "pairlist"])

@@ -410,6 +410,49 @@ class FtRestClient:
             },
         )
 
+    def forcespread(
+        self,
+        pair,
+        spread_type,
+        expiry_date,
+        long_strike,
+        short_strike,
+        *,
+        order_type=None,
+        stake_amount=None,
+        enter_tag=None,
+    ):
+        """Force enter an options spread position.
+
+        :param pair: Trading pair (e.g., 'BTC/USD')
+        :param spread_type: Type of spread ('bull_call', 'bear_put', 'bull_put', 'bear_call')
+        :param expiry_date: Expiry date in YYMMDD or YYYY-MM-DD format
+        :param long_strike: Strike price for the long leg
+        :param short_strike: Strike price for the short leg
+        :param order_type: Optional - 'limit' or 'market'
+        :param stake_amount: Optional - stake amount for the spread
+        :param enter_tag: Optional - entry tag for the spread
+        :return: json object with spread details
+        """
+        data = {
+            "pair": pair,
+            "spread_type": spread_type,
+            "expiry_date": expiry_date,
+            "long_strike": long_strike,
+            "short_strike": short_strike,
+        }
+
+        if order_type:
+            data["ordertype"] = order_type
+
+        if stake_amount:
+            data["stakeamount"] = stake_amount
+
+        if enter_tag:
+            data["entry_tag"] = enter_tag
+
+        return self._post("forcespread", data=data)
+
     def strategies(self):
         """Lists available strategies
 

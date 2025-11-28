@@ -1116,6 +1116,186 @@ class RPC:
             else:
                 raise RPCException(f"Failed to enter position for {pair}.")
 
+    def _rpc_force_spread(
+        self,
+        pair: str,
+        spread_type: str,
+        expiry_date: str,
+        long_strike: float,
+        short_strike: float,
+        *,
+        stake_amount: float | None = None,
+        order_type: str | None = None,
+        enter_tag: str | None = "force_spread",
+    ) -> dict:
+        """
+        Handler for forcespread - creates an options spread position.
+
+        Supports vertical spreads:
+        - bull_call: Buy lower strike call, sell higher strike call
+        - bear_put: Buy higher strike put, sell lower strike put
+        - bull_put: Sell higher strike put, buy lower strike put (credit spread)
+        - bear_call: Sell lower strike call, buy higher strike call (credit spread)
+        """
+        if not self._freqtrade.config.get("force_entry_enable", False):
+            raise RPCException("Force_entry not enabled.")
+
+        if self._freqtrade.state == State.STOPPED:
+            raise RPCException("trader is not running")
+
+        # Validate trading mode is OPTIONS
+        trading_mode = self._freqtrade.config.get("trading_mode", TradingMode.SPOT)
+        if trading_mode != TradingMode.OPTIONS:
+            raise RPCException(
+                f"Options spread trading requires trading_mode='options'. "
+                f"Current mode: {trading_mode}"
+            )
+
+        # Validate spread type
+        valid_spread_types = ["bull_call", "bear_put", "bull_put", "bear_call"]
+        if spread_type not in valid_spread_types:
+            raise RPCException(
+                f"Invalid spread_type '{spread_type}'. "
+                f"Must be one of: {', '.join(valid_spread_types)}"
+            )
+
+        # Validate strikes
+        if long_strike <= 0 or short_strike <= 0:
+            raise RPCException("Strike prices must be positive.")
+
+        # Check if exchange supports spread orders
+        exchange = self._freqtrade.exchange
+        if not hasattr(exchange, "create_spread_order"):
+            raise RPCException(
+                f"Exchange {exchange.name} does not support options spread orders. "
+                f"Use OKX exchange for options spread trading."
+            )
+
+        # Get stake amount
+        if not stake_amount:
+            stake_amount = self._freqtrade.wallets.get_trade_stake_amount(
+                pair, self._config["max_open_trades"]
+            )
+
+        # Build option symbols
+        # Format: BTC-USD-250131-50000-C
+        underlying = pair.replace("/", "-")
+
+        # Determine option type based on spread type
+        if spread_type in ["bull_call", "bear_call"]:
+            option_type = "C"  # Calls
+        else:
+            option_type = "P"  # Puts
+
+        # Build leg symbols
+        if spread_type == "bull_call":
+            # Buy lower strike call, sell higher strike call
+            leg1_symbol = f"{underlying}-{expiry_date}-{int(long_strike)}-{option_type}"
+            leg1_side = "buy"
+            leg2_symbol = f"{underlying}-{expiry_date}-{int(short_strike)}-{option_type}"
+            leg2_side = "sell"
+        elif spread_type == "bear_put":
+            # Buy higher strike put, sell lower strike put
+            leg1_symbol = f"{underlying}-{expiry_date}-{int(long_strike)}-{option_type}"
+            leg1_side = "buy"
+            leg2_symbol = f"{underlying}-{expiry_date}-{int(short_strike)}-{option_type}"
+            leg2_side = "sell"
+        elif spread_type == "bull_put":
+            # Sell higher strike put, buy lower strike put (credit spread)
+            leg1_symbol = f"{underlying}-{expiry_date}-{int(short_strike)}-{option_type}"
+            leg1_side = "sell"
+            leg2_symbol = f"{underlying}-{expiry_date}-{int(long_strike)}-{option_type}"
+            leg2_side = "buy"
+        else:  # bear_call
+            # Sell lower strike call, buy higher strike call (credit spread)
+            leg1_symbol = f"{underlying}-{expiry_date}-{int(short_strike)}-{option_type}"
+            leg1_side = "sell"
+            leg2_symbol = f"{underlying}-{expiry_date}-{int(long_strike)}-{option_type}"
+            leg2_side = "buy"
+
+        try:
+            # Create spread order using batch orders for atomic execution
+            result = exchange.create_spread_order(
+                leg1_symbol=leg1_symbol,
+                leg1_side=leg1_side,
+                leg1_amount=1.0,  # 1 contract per leg
+                leg1_price=None,  # Will use market price
+                leg2_symbol=leg2_symbol,
+                leg2_side=leg2_side,
+                leg2_amount=1.0,
+                leg2_price=None,
+                order_type=order_type or "limit",
+            )
+
+            # Calculate theoretical max profit/loss (approximate values)
+            # Note: Actual max profit/loss depends on premiums paid/received,
+            # which requires real-time option pricing data from the exchange.
+            # These are placeholder values based on strike difference.
+            strike_diff = abs(long_strike - short_strike)
+
+            # For now, we'll return the strike difference as an approximation
+            # The actual max profit/loss will be determined by the execution prices
+            if spread_type in ["bull_call", "bear_put"]:
+                # Debit spreads: risk is defined, reward is defined
+                # Max loss = net debit (premium paid)
+                # Max profit = strike diff - net debit
+                max_loss = None  # Will be actual premium paid
+                max_profit = strike_diff  # Theoretical max at expiry
+            else:
+                # Credit spreads: risk is defined, reward is defined
+                # Max profit = net credit (premium received)
+                # Max loss = strike diff - net credit
+                max_profit = None  # Will be actual premium received
+                max_loss = strike_diff  # Theoretical max at expiry
+
+            # Build the long_leg and short_leg response
+            # For clarity: "long" refers to the position you own (bought option)
+            # "short" refers to the position you owe (sold option)
+            long_leg_symbol = f"{underlying}-{expiry_date}-{int(long_strike)}-{option_type}"
+            short_leg_symbol = f"{underlying}-{expiry_date}-{int(short_strike)}-{option_type}"
+
+            # Determine actual sides based on spread type
+            if spread_type in ["bull_call", "bear_put"]:
+                # Debit spreads: buy long_strike, sell short_strike
+                long_side = "buy"
+                short_side = "sell"
+            else:
+                # Credit spreads: sell the option at short_strike, buy protection at long_strike
+                long_side = "buy"
+                short_side = "sell"
+
+            return {
+                "status": f"Successfully created {spread_type} spread for {pair}",
+                "spread_type": spread_type,
+                "pair": pair,
+                "long_leg": {
+                    "symbol": long_leg_symbol,
+                    "side": long_side,
+                    "strike": long_strike,
+                },
+                "short_leg": {
+                    "symbol": short_leg_symbol,
+                    "side": short_side,
+                    "strike": short_strike,
+                },
+                "expiry_date": expiry_date,
+                "max_profit": max_profit,
+                "max_loss": max_loss,
+            }
+
+        except Exception as e:
+            logger.exception(f"Error creating spread order: {e}")
+            return {
+                "status": f"Error creating {spread_type} spread for {pair}: {str(e)}",
+                "spread_type": spread_type,
+                "pair": pair,
+                "long_leg": None,
+                "short_leg": None,
+                "expiry_date": expiry_date,
+                "max_profit": None,
+                "max_loss": None,
+            }
+
     def _rpc_cancel_open_order(self, trade_id: int):
         if self._freqtrade.state == State.STOPPED:
             raise RPCException("trader is not running")
