@@ -3972,3 +3972,99 @@ class Exchange:
         :return: Datetime if the pair gonna be delisted, None otherwise
         """
         return None
+
+    # Options Trading Methods
+
+    def fetch_options_markets(self, base_currency: str = "BTC") -> list[dict]:
+        """
+        Fetch available options contracts for a given base currency.
+        Should be overridden by exchange-specific implementations.
+        :param base_currency: Base currency (e.g., 'BTC', 'ETH')
+        :return: List of option contract details
+        """
+        raise OperationalException(
+            f"fetch_options_markets is not supported by {self.name}. "
+            "Options trading may not be available on this exchange."
+        )
+
+    def fetch_option_chain(
+        self, underlying: str, expiry_date: str | None = None
+    ) -> dict[str, Any]:
+        """
+        Fetch option chain (all strikes for a given expiry) for an underlying asset.
+        Should be overridden by exchange-specific implementations.
+        :param underlying: Underlying asset (e.g., 'BTC-USDT')
+        :param expiry_date: Expiry date in format 'YYMMDD' or 'YYYY-MM-DD' (optional)
+        :return: Dictionary containing option chain data
+        """
+        raise OperationalException(
+            f"fetch_option_chain is not supported by {self.name}. "
+            "Options trading may not be available on this exchange."
+        )
+
+    def fetch_greeks(self, symbol: str) -> dict[str, float]:
+        """
+        Fetch Greeks (delta, gamma, theta, vega, rho) for an option contract.
+        Should be overridden by exchange-specific implementations.
+        :param symbol: Option symbol
+        :return: Dictionary with Greeks values
+        """
+        raise OperationalException(
+            f"fetch_greeks is not supported by {self.name}. "
+            "Options trading may not be available on this exchange."
+        )
+
+    def create_option_order(
+        self,
+        symbol: str,
+        order_type: str,
+        side: BuySell,
+        amount: float,
+        price: float | None = None,
+        params: dict | None = None,
+    ) -> dict:
+        """
+        Create an options order.
+        Should be overridden by exchange-specific implementations.
+        :param symbol: Option symbol
+        :param order_type: 'limit' or 'market'
+        :param side: 'buy' or 'sell'
+        :param amount: Number of contracts
+        :param price: Limit price (for limit orders)
+        :param params: Additional parameters
+        :return: Order response from exchange
+        """
+        raise OperationalException(
+            f"create_option_order is not supported by {self.name}. "
+            "Options trading may not be available on this exchange."
+        )
+
+    def parse_option_symbol(self, symbol: str) -> dict[str, Any]:
+        """
+        Parse an option symbol to extract underlying, strike, expiry, and type.
+        Example: 'BTC-USD-250131-50000-C' ->
+        {underlying: 'BTC-USD', expiry: '250131', strike: 50000, type: 'call'}
+        :param symbol: Option symbol
+        :return: Dictionary with parsed components
+        """
+        parts = symbol.split("-")
+        if len(parts) >= 5:
+            return {
+                "underlying": f"{parts[0]}-{parts[1]}",
+                "expiry": parts[2],
+                "strike": float(parts[3]),
+                "option_type": "call" if parts[4].upper() == "C" else "put",
+            }
+        raise ValueError(f"Invalid option symbol format: {symbol}")
+
+    def get_option_expiry_dates(self, underlying: str) -> list[str]:
+        """
+        Get available expiry dates for options on an underlying asset.
+        Should be overridden by exchange-specific implementations.
+        :param underlying: Underlying asset (e.g., 'BTC-USDT')
+        :return: List of expiry dates
+        """
+        raise OperationalException(
+            f"get_option_expiry_dates is not supported by {self.name}. "
+            "Options trading may not be available on this exchange."
+        )

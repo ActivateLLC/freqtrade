@@ -194,6 +194,31 @@ CONF_SCHEMA = {
             "type": "string",
             "enum": MARGIN_MODES,
         },
+        # Options trading parameters
+        "options_expiry_preference": {
+            "description": "Preferred expiry type for options (weekly, monthly, quarterly).",
+            "type": "string",
+            "enum": ["weekly", "monthly", "quarterly"],
+        },
+        "options_min_days_to_expiry": {
+            "description": "Minimum number of days to expiry for option contracts.",
+            "type": "number",
+            "minimum": 1,
+            "default": 7,
+        },
+        "options_max_days_to_expiry": {
+            "description": "Maximum number of days to expiry for option contracts.",
+            "type": "number",
+            "minimum": 1,
+            "default": 90,
+        },
+        "options_strike_offset_pct": {
+            "description": "Percentage offset from current price for option strike selection (0.05 = 5%).",
+            "type": "number",
+            "minimum": 0,
+            "maximum": 0.5,
+            "default": 0.05,
+        },
         "reduce_df_footprint": {
             "description": "Reduce DataFrame footprint by casting columns to float32/int32.",
             "type": "boolean",

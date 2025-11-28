@@ -860,6 +860,61 @@ class FreqtradeBot(LoggingMixin):
             logger.info(f"Bids to asks delta for {pair} does not satisfy condition.")
             return False
 
+    def _populate_option_trade_data(
+        self, trade: Trade, pair: str, order: dict
+    ) -> None:
+        """
+        Populate option-specific data in the trade object.
+        This is called when creating a new options trade.
+
+        :param trade: Trade object to populate
+        :param pair: Trading pair (underlying)
+        :param order: Order response from exchange
+        """
+        try:
+            # Extract option details from the order/pair
+            # The actual option symbol might be in order['symbol'] for options
+            option_symbol = order.get("symbol", pair)
+
+            # Parse option symbol to get strike, expiry, type
+            parsed = self.exchange.parse_option_symbol(option_symbol)
+
+            trade.option_type = parsed.get("option_type")
+            trade.strike_price = parsed.get("strike")
+
+            # Parse expiry date
+            expiry_str = parsed.get("expiry")
+            if expiry_str:
+                try:
+                    if len(expiry_str) == 6:  # YYMMDD format
+                        trade.expiry_date = datetime.strptime(expiry_str, "%y%m%d")
+                    elif len(expiry_str) == 10:  # YYYY-MM-DD format
+                        trade.expiry_date = datetime.strptime(expiry_str, "%Y-%m-%d")
+                except ValueError as e:
+                    logger.warning(f"Could not parse expiry date {expiry_str}: {e}")
+
+            # Fetch Greeks for the option
+            try:
+                greeks = self.exchange.fetch_greeks(option_symbol)
+                trade.delta = greeks.get("delta")
+                trade.gamma = greeks.get("gamma")
+                trade.theta = greeks.get("theta")
+                trade.vega = greeks.get("vega")
+                trade.implied_volatility = greeks.get("iv")
+            except Exception as e:
+                logger.warning(f"Could not fetch Greeks for {option_symbol}: {e}")
+
+            # Store premium paid (entry price for options)
+            trade.option_premium = trade.open_rate
+
+            logger.info(
+                f"Option trade initialized: {trade.option_type} strike={trade.strike_price} "
+                f"expiry={trade.expiry_date} IV={trade.implied_volatility}"
+            )
+
+        except Exception as e:
+            logger.error(f"Error populating option trade data for {pair}: {e}")
+
     def execute_entry(
         self,
         pair: str,
@@ -1027,6 +1082,11 @@ class FreqtradeBot(LoggingMixin):
                 precision_mode_price=self.exchange.precision_mode_price,
                 contract_size=self.exchange.get_contract_size(pair),
             )
+
+            # Options-specific initialization
+            if self.trading_mode == TradingMode.OPTIONS:
+                self._populate_option_trade_data(trade, pair, order)
+
             stoploss = self.strategy.stoploss
             trade.adjust_stop_loss(trade.open_rate, stoploss, initial=True)
 
