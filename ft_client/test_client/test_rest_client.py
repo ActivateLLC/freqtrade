@@ -117,6 +117,26 @@ def test_FtRestClient_call_invalid(caplog):
         ("forceexit", [1], {}),
         ("forceexit", [1, "limit"], {}),
         ("forceexit", [1, "limit", 100], {}),
+        # Force spread tests
+        ("forcespread", ["BTC/USD", "bull_call", "250131", 50000, 52000], {}),
+        ("forcespread", ["BTC/USD", "bear_put", "250131", 50000, 48000], {}),
+        ("forcespread", ["BTC/USD", "bull_put", "250131", 50000, 48000], {}),
+        ("forcespread", ["BTC/USD", "bear_call", "250131", 50000, 52000], {}),
+        (
+            "forcespread",
+            ["BTC/USD", "bull_call", "250131", 50000, 52000],
+            {"order_type": "limit"},
+        ),
+        (
+            "forcespread",
+            ["BTC/USD", "bull_call", "250131", 50000, 52000],
+            {"stake_amount": 1000},
+        ),
+        (
+            "forcespread",
+            ["BTC/USD", "bull_call", "250131", 50000, 52000],
+            {"order_type": "limit", "stake_amount": 1000, "enter_tag": "test_spread"},
+        ),
         ("strategies", [], {}),
         ("strategy", ["sampleStrategy"], {}),
         ("pairlists_available", [], {}),
