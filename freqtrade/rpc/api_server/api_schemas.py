@@ -4,7 +4,7 @@ from typing import Any
 from pydantic import AwareDatetime, BaseModel, RootModel, SerializeAsAny, model_validator
 
 from freqtrade.constants import DL_DATA_TIMEFRAMES, IntOrInf
-from freqtrade.enums import MarginMode, OrderTypeValues, SignalDirection, TradingMode
+from freqtrade.enums import MarginMode, OptionType, OrderTypeValues, SignalDirection, TradingMode
 from freqtrade.ft_types import AnnotationType, ValidExchangesType
 from freqtrade.rpc.api_server.webserver_bgwork import ProgressTask
 
@@ -426,6 +426,41 @@ class ForceExitPayload(BaseModel):
     tradeid: str | int
     ordertype: OrderTypeValues | None = None
     amount: float | None = None
+
+
+class SpreadType(str):
+    """Spread type enum as string"""
+
+    BULL_CALL = "bull_call"
+    BEAR_PUT = "bear_put"
+    BULL_PUT = "bull_put"
+    BEAR_CALL = "bear_call"
+
+
+class ForceSpreadPayload(BaseModel):
+    """Payload for forcing an options spread entry via the UI."""
+
+    pair: str
+    spread_type: str  # bull_call, bear_put, bull_put, bear_call
+    expiry_date: str  # Format: YYMMDD or YYYY-MM-DD
+    long_strike: float  # Strike price for long leg
+    short_strike: float  # Strike price for short leg
+    stakeamount: float | None = None
+    ordertype: OrderTypeValues | None = None
+    entry_tag: str | None = None
+
+
+class ForceSpreadResponse(BaseModel):
+    """Response for force spread entry."""
+
+    status: str
+    spread_type: str | None = None
+    pair: str | None = None
+    long_leg: dict | None = None
+    short_leg: dict | None = None
+    expiry_date: str | None = None
+    max_profit: float | None = None
+    max_loss: float | None = None
 
 
 class BlacklistPayload(BaseModel):
