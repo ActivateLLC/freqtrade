@@ -1227,22 +1227,42 @@ class RPC:
                 order_type=order_type or "limit",
             )
 
-            # Calculate theoretical max profit/loss
+            # Calculate theoretical max profit/loss (approximate values)
+            # Note: Actual max profit/loss depends on premiums paid/received,
+            # which requires real-time option pricing data from the exchange.
+            # These are placeholder values based on strike difference.
             strike_diff = abs(long_strike - short_strike)
 
+            # For now, we'll return the strike difference as an approximation
+            # The actual max profit/loss will be determined by the execution prices
             if spread_type in ["bull_call", "bear_put"]:
-                # Debit spreads: max loss = premium paid, max profit = strike diff - premium
-                max_loss = stake_amount
-                max_profit = strike_diff - stake_amount
+                # Debit spreads: risk is defined, reward is defined
+                # Max loss = net debit (premium paid)
+                # Max profit = strike diff - net debit
+                max_loss = None  # Will be actual premium paid
+                max_profit = strike_diff  # Theoretical max at expiry
             else:
-                # Credit spreads: max profit = premium received, max loss = strike diff - premium
-                max_profit = stake_amount
-                max_loss = strike_diff - stake_amount
+                # Credit spreads: risk is defined, reward is defined
+                # Max profit = net credit (premium received)
+                # Max loss = strike diff - net credit
+                max_profit = None  # Will be actual premium received
+                max_loss = strike_diff  # Theoretical max at expiry
 
-            # Build the long_leg and short_leg based on long_strike and short_strike
-            # The long leg is always at long_strike, short leg at short_strike
+            # Build the long_leg and short_leg response
+            # For clarity: "long" refers to the position you own (bought option)
+            # "short" refers to the position you owe (sold option)
             long_leg_symbol = f"{underlying}-{expiry_date}-{int(long_strike)}-{option_type}"
             short_leg_symbol = f"{underlying}-{expiry_date}-{int(short_strike)}-{option_type}"
+
+            # Determine actual sides based on spread type
+            if spread_type in ["bull_call", "bear_put"]:
+                # Debit spreads: buy long_strike, sell short_strike
+                long_side = "buy"
+                short_side = "sell"
+            else:
+                # Credit spreads: sell the option at short_strike, buy protection at long_strike
+                long_side = "buy"
+                short_side = "sell"
 
             return {
                 "status": f"Successfully created {spread_type} spread for {pair}",
@@ -1250,12 +1270,12 @@ class RPC:
                 "pair": pair,
                 "long_leg": {
                     "symbol": long_leg_symbol,
-                    "side": "buy",
+                    "side": long_side,
                     "strike": long_strike,
                 },
                 "short_leg": {
                     "symbol": short_leg_symbol,
-                    "side": "sell",
+                    "side": short_side,
                     "strike": short_strike,
                 },
                 "expiry_date": expiry_date,
