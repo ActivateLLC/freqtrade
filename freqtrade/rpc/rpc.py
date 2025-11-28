@@ -1239,17 +1239,22 @@ class RPC:
                 max_profit = stake_amount
                 max_loss = strike_diff - stake_amount
 
+            # Build the long_leg and short_leg based on long_strike and short_strike
+            # The long leg is always at long_strike, short leg at short_strike
+            long_leg_symbol = f"{underlying}-{expiry_date}-{int(long_strike)}-{option_type}"
+            short_leg_symbol = f"{underlying}-{expiry_date}-{int(short_strike)}-{option_type}"
+
             return {
                 "status": f"Successfully created {spread_type} spread for {pair}",
                 "spread_type": spread_type,
                 "pair": pair,
                 "long_leg": {
-                    "symbol": leg1_symbol if leg1_side == "buy" else leg2_symbol,
+                    "symbol": long_leg_symbol,
                     "side": "buy",
                     "strike": long_strike,
                 },
                 "short_leg": {
-                    "symbol": leg2_symbol if leg2_side == "sell" else leg1_symbol,
+                    "symbol": short_leg_symbol,
                     "side": "sell",
                     "strike": short_strike,
                 },

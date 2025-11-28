@@ -4,7 +4,7 @@ from typing import Any
 from pydantic import AwareDatetime, BaseModel, RootModel, SerializeAsAny, model_validator
 
 from freqtrade.constants import DL_DATA_TIMEFRAMES, IntOrInf
-from freqtrade.enums import MarginMode, OptionType, OrderTypeValues, SignalDirection, TradingMode
+from freqtrade.enums import MarginMode, OrderTypeValues, SignalDirection, TradingMode
 from freqtrade.ft_types import AnnotationType, ValidExchangesType
 from freqtrade.rpc.api_server.webserver_bgwork import ProgressTask
 
@@ -426,15 +426,6 @@ class ForceExitPayload(BaseModel):
     tradeid: str | int
     ordertype: OrderTypeValues | None = None
     amount: float | None = None
-
-
-class SpreadType(str):
-    """Spread type enum as string"""
-
-    BULL_CALL = "bull_call"
-    BEAR_PUT = "bear_put"
-    BULL_PUT = "bull_put"
-    BEAR_CALL = "bear_call"
 
 
 class ForceSpreadPayload(BaseModel):
