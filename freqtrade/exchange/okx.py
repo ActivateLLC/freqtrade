@@ -53,6 +53,7 @@ class Okx(Exchange):
         # (TradingMode.MARGIN, MarginMode.CROSS),
         # (TradingMode.FUTURES, MarginMode.CROSS),
         (TradingMode.FUTURES, MarginMode.ISOLATED),
+        (TradingMode.OPTIONS, MarginMode.NONE),
     ]
 
     net_only = True
@@ -289,6 +290,326 @@ class Okx(Exchange):
         orders_open = self._api.fetch_open_orders(pair, since=since_ms)
         orders.extend(orders_open)
         return orders
+
+    # Options Trading Methods for OKX
+
+    @retrier
+    def fetch_options_markets(self, base_currency: str = "BTC") -> list[dict]:
+        """
+        Fetch available options contracts for OKX.
+        Uses OKX API endpoint: /api/v5/public/instruments?instType=OPTION&uly=BTC-USD
+        :param base_currency: Base currency (e.g., 'BTC', 'ETH')
+        :return: List of option contract details
+        """
+        try:
+            # OKX uses format like 'BTC-USD' for underlying
+            underlying = f"{base_currency}-USD"
+            params = {"type": "option", "underlying": underlying}
+            markets = self._api.fetch_markets(params=params)
+            self._log_exchange_response("fetch_options_markets", markets)
+            return markets
+        except ccxt.DDoSProtection as e:
+            raise DDosProtection(e) from e
+        except (ccxt.OperationFailed, ccxt.ExchangeError) as e:
+            raise TemporaryError(
+                f"Could not fetch options markets due to {e.__class__.__name__}. Message: {e}"
+            ) from e
+        except ccxt.BaseError as e:
+            raise OperationalException(e) from e
+
+    @retrier
+    def fetch_option_chain(self, underlying: str, expiry_date: str | None = None) -> dict:
+        """
+        Fetch option chain for OKX.
+        :param underlying: Underlying asset (e.g., 'BTC-USD')
+        :param expiry_date: Expiry date in format 'YYMMDD' (optional)
+        :return: Dictionary containing option chain data with strikes and prices
+        """
+        try:
+            # Fetch all option instruments for the underlying
+            params = {"type": "option", "underlying": underlying}
+            if expiry_date:
+                params["expiry"] = expiry_date
+
+            markets = self._api.fetch_markets(params=params)
+            self._log_exchange_response("fetch_option_chain", markets)
+
+            # Group by expiry and strike
+            option_chain = {}
+            for market in markets:
+                symbol = market.get("symbol", "")
+                parsed = self.parse_option_symbol(symbol)
+                expiry = parsed.get("expiry")
+                strike = parsed.get("strike")
+                option_type = parsed.get("option_type")
+
+                if expiry not in option_chain:
+                    option_chain[expiry] = {"calls": {}, "puts": {}}
+
+                if option_type == "call":
+                    option_chain[expiry]["calls"][strike] = market
+                else:
+                    option_chain[expiry]["puts"][strike] = market
+
+            return option_chain
+        except ccxt.DDoSProtection as e:
+            raise DDosProtection(e) from e
+        except (ccxt.OperationFailed, ccxt.ExchangeError) as e:
+            raise TemporaryError(
+                f"Could not fetch option chain due to {e.__class__.__name__}. Message: {e}"
+            ) from e
+        except ccxt.BaseError as e:
+            raise OperationalException(e) from e
+
+    @retrier
+    def fetch_greeks(self, symbol: str) -> dict[str, float]:
+        """
+        Fetch Greeks for an OKX option contract.
+        Uses OKX API endpoint: /api/v5/public/opt-summary?instId=SYMBOL
+        :param symbol: Option symbol (e.g., 'BTC-USD-250131-50000-C')
+        :return: Dictionary with Greeks (delta, gamma, theta, vega)
+        """
+        try:
+            # OKX provides Greeks through the opt-summary endpoint
+            # This is a custom implementation using ccxt's publicGetPublicOptSummary
+            params = {"instId": symbol}
+            response = self._api.public_get_public_opt_summary(params)
+            self._log_exchange_response("fetch_greeks", response)
+
+            if response.get("code") == "0" and response.get("data"):
+                data = response["data"][0] if response["data"] else {}
+                return {
+                    "delta": float(data.get("delta", 0)),
+                    "gamma": float(data.get("gamma", 0)),
+                    "theta": float(data.get("theta", 0)),
+                    "vega": float(data.get("vega", 0)),
+                    "iv": float(data.get("realVol", 0)),  # Implied volatility
+                }
+            return {"delta": 0, "gamma": 0, "theta": 0, "vega": 0, "iv": 0}
+        except ccxt.DDoSProtection as e:
+            raise DDosProtection(e) from e
+        except (ccxt.OperationFailed, ccxt.ExchangeError) as e:
+            logger.warning(
+                f"Could not fetch Greeks for {symbol} due to {e.__class__.__name__}. "
+                f"Message: {e}. Returning zeros."
+            )
+            return {"delta": 0, "gamma": 0, "theta": 0, "vega": 0, "iv": 0}
+        except ccxt.BaseError as e:
+            raise OperationalException(e) from e
+
+    @retrier
+    def create_option_order(
+        self,
+        symbol: str,
+        order_type: str,
+        side: BuySell,
+        amount: float,
+        price: float | None = None,
+        params: dict | None = None,
+    ) -> dict:
+        """
+        Create an options order on OKX.
+        :param symbol: Option symbol (e.g., 'BTC-USD-250131-50000-C')
+        :param order_type: 'limit' or 'market'
+        :param side: 'buy' or 'sell'
+        :param amount: Number of contracts
+        :param price: Limit price (for limit orders)
+        :param params: Additional parameters
+        :return: Order response from OKX
+        """
+        try:
+            if params is None:
+                params = {}
+
+            # OKX options use tdMode=cash (options are cash-settled)
+            params["tdMode"] = "cash"
+
+            order = self._api.create_order(
+                symbol=symbol, type=order_type, side=side, amount=amount, price=price, params=params
+            )
+            self._log_exchange_response("create_option_order", order)
+            return order
+        except ccxt.InsufficientFunds as e:
+            raise RetryableOrderError(
+                f"Insufficient funds to create option order on {self.name}. Message: {e}"
+            ) from e
+        except ccxt.InvalidOrder as e:
+            raise OperationalException(
+                f"Could not create option order on {self.name}. Message: {e}"
+            ) from e
+        except ccxt.DDoSProtection as e:
+            raise DDosProtection(e) from e
+        except (ccxt.OperationFailed, ccxt.ExchangeError) as e:
+            raise TemporaryError(
+                f"Could not create option order due to {e.__class__.__name__}. Message: {e}"
+            ) from e
+        except ccxt.BaseError as e:
+            raise OperationalException(e) from e
+
+    @retrier
+    def get_option_expiry_dates(self, underlying: str) -> list[str]:
+        """
+        Get available expiry dates for OKX options on an underlying asset.
+        :param underlying: Underlying asset (e.g., 'BTC-USD')
+        :return: List of expiry dates in YYMMDD format
+        """
+        try:
+            params = {"type": "option", "underlying": underlying}
+            markets = self._api.fetch_markets(params=params)
+            self._log_exchange_response("get_option_expiry_dates", markets)
+
+            # Extract unique expiry dates
+            expiry_dates = set()
+            for market in markets:
+                symbol = market.get("symbol", "")
+                try:
+                    parsed = self.parse_option_symbol(symbol)
+                    expiry_dates.add(parsed.get("expiry"))
+                except (ValueError, IndexError):
+                    continue
+
+            return sorted(list(expiry_dates))
+        except ccxt.DDoSProtection as e:
+            raise DDosProtection(e) from e
+        except (ccxt.OperationFailed, ccxt.ExchangeError) as e:
+            raise TemporaryError(
+                f"Could not get expiry dates due to {e.__class__.__name__}. Message: {e}"
+            ) from e
+        except ccxt.BaseError as e:
+            raise OperationalException(e) from e
+
+    @retrier
+    def create_batch_orders(self, orders: list[dict]) -> dict:
+        """
+        Create multiple orders simultaneously (useful for spreads).
+        Uses OKX batch-orders endpoint for atomic execution.
+
+        :param orders: List of order dictionaries, each containing:
+            - symbol: Option symbol
+            - type: Order type ('limit' or 'market')
+            - side: 'buy' or 'sell'
+            - amount: Number of contracts
+            - price: Limit price (optional for market orders)
+        :return: Batch order response from OKX
+        """
+        try:
+            # Format orders for OKX batch endpoint
+            okx_orders = []
+            for order in orders:
+                okx_order = {
+                    "instId": order["symbol"],
+                    "tdMode": "cash",  # Options use cash settlement
+                    "side": order["side"],
+                    "ordType": order.get("type", "limit"),
+                    "sz": str(order["amount"]),
+                }
+
+                if order.get("price"):
+                    okx_order["px"] = str(order["price"])
+
+                okx_orders.append(okx_order)
+
+            # Submit batch order
+            response = self._api.private_post_trade_batch_orders({"orders": okx_orders})
+            self._log_exchange_response("create_batch_orders", response)
+
+            return response
+
+        except ccxt.InsufficientFunds as e:
+            raise RetryableOrderError(
+                f"Insufficient funds for batch order on {self.name}. Message: {e}"
+            ) from e
+        except ccxt.InvalidOrder as e:
+            raise OperationalException(
+                f"Could not create batch order on {self.name}. Message: {e}"
+            ) from e
+        except ccxt.DDoSProtection as e:
+            raise DDosProtection(e) from e
+        except (ccxt.OperationFailed, ccxt.ExchangeError) as e:
+            raise TemporaryError(
+                f"Could not create batch order due to {e.__class__.__name__}. Message: {e}"
+            ) from e
+        except ccxt.BaseError as e:
+            raise OperationalException(e) from e
+
+    @retrier
+    def create_spread_order(
+        self,
+        leg1_symbol: str,
+        leg1_side: BuySell,
+        leg1_amount: float,
+        leg1_price: float | None,
+        leg2_symbol: str,
+        leg2_side: BuySell,
+        leg2_amount: float,
+        leg2_price: float | None,
+        order_type: str = "limit",
+    ) -> dict:
+        """
+        Create a two-legged spread order with atomic execution.
+
+        Both legs will be submitted simultaneously using OKX batch orders.
+        This reduces execution risk compared to sequential orders.
+
+        :param leg1_symbol: First leg option symbol
+        :param leg1_side: 'buy' or 'sell'
+        :param leg1_amount: Number of contracts for leg 1
+        :param leg1_price: Limit price for leg 1
+        :param leg2_symbol: Second leg option symbol
+        :param leg2_side: 'buy' or 'sell'
+        :param leg2_amount: Number of contracts for leg 2
+        :param leg2_price: Limit price for leg 2
+        :param order_type: 'limit' or 'market'
+        :return: Batch order response
+        """
+        orders = [
+            {
+                "symbol": leg1_symbol,
+                "side": leg1_side,
+                "amount": leg1_amount,
+                "price": leg1_price,
+                "type": order_type,
+            },
+            {
+                "symbol": leg2_symbol,
+                "side": leg2_side,
+                "amount": leg2_amount,
+                "price": leg2_price,
+                "type": order_type,
+            },
+        ]
+
+        logger.info(
+            f"Creating spread order: {leg1_side.upper()} {leg1_symbol} @ {leg1_price} | "
+            f"{leg2_side.upper()} {leg2_symbol} @ {leg2_price}"
+        )
+
+        return self.create_batch_orders(orders)
+
+    def cancel_batch_orders(self, order_ids: list[str], pair: str) -> dict:
+        """
+        Cancel multiple orders simultaneously.
+
+        :param order_ids: List of order IDs to cancel
+        :param pair: Trading pair
+        :return: Cancel response from OKX
+        """
+        try:
+            cancel_requests = [{"instId": pair, "ordId": oid} for oid in order_ids]
+
+            response = self._api.private_post_trade_cancel_batch_orders(cancel_requests)
+            self._log_exchange_response("cancel_batch_orders", response)
+
+            return response
+
+        except ccxt.DDoSProtection as e:
+            raise DDosProtection(e) from e
+        except (ccxt.OperationFailed, ccxt.ExchangeError) as e:
+            raise TemporaryError(
+                f"Could not cancel batch orders due to {e.__class__.__name__}. Message: {e}"
+            ) from e
+        except ccxt.BaseError as e:
+            raise OperationalException(e) from e
 
 
 class Myokx(Okx):

@@ -107,7 +107,7 @@ TRADES_DTYPES = {
     "amount": "float64",
     "cost": "float64",
 }
-TRADING_MODES = ["spot", "margin", "futures"]
+TRADING_MODES = ["spot", "margin", "futures", "options"]
 MARGIN_MODES = ["cross", "isolated", ""]
 
 LAST_BT_RESULT_FN = ".last_result.json"

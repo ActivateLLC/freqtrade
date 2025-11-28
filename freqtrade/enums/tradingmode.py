@@ -4,12 +4,13 @@ from enum import Enum
 class TradingMode(str, Enum):
     """
     Enum to distinguish between
-    spot, margin, futures or any other trading method
+    spot, margin, futures, options or any other trading method
     """
 
     SPOT = "spot"
     MARGIN = "margin"
     FUTURES = "futures"
+    OPTIONS = "options"
 
     def __str__(self):
         return f"{self.name.lower()}"

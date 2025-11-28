@@ -438,6 +438,107 @@ class IStrategy(ABC, HyperStrategyMixin):
         """
         pass
 
+    # Options Trading Callbacks
+
+    def select_option_contract(
+        self,
+        pair: str,
+        signal_direction: SignalDirection,
+        current_rate: float,
+        dataframe: DataFrame,
+        metadata: dict,
+        **kwargs,
+    ) -> dict | None:
+        """
+        Called when trading_mode is OPTIONS to select the specific option contract to trade.
+        Should be overridden by strategies that trade options.
+
+        :param pair: Underlying pair (e.g., 'BTC/USDT')
+        :param signal_direction: SignalDirection.LONG or SignalDirection.SHORT
+        :param current_rate: Current price of the underlying
+        :param dataframe: Analyzed dataframe
+        :param metadata: Additional metadata
+        :param **kwargs: Ensure to keep this here so updates to this won't break your strategy.
+        :return: Dictionary with option contract details:
+            {
+                'option_type': 'call' or 'put',
+                'strike_price': float,
+                'expiry_date': 'YYMMDD' or 'YYYY-MM-DD',
+                'symbol': 'BTC-USD-250131-50000-C'  # Optional, will be constructed if not provided
+            }
+            Returns None to skip the trade.
+        """
+        return None
+
+    def select_option_expiry(
+        self, pair: str, current_time: datetime, available_expiries: list[str], **kwargs
+    ) -> str | None:
+        """
+        Called to select the expiry date for an option contract.
+        Can be overridden to implement custom expiry selection logic.
+
+        Default implementation selects the nearest expiry at least 7 days away.
+
+        :param pair: Underlying pair (e.g., 'BTC/USDT')
+        :param current_time: Current datetime
+        :param available_expiries: List of available expiry dates
+        :param **kwargs: Ensure to keep this here so updates to this won't break your strategy.
+        :return: Selected expiry date string, or None to skip
+        """
+        if not available_expiries:
+            return None
+
+        # Default: Select nearest expiry at least 7 days away
+        min_days = 7
+        for expiry in sorted(available_expiries):
+            # Assuming expiry format is YYMMDD
+            try:
+                if len(expiry) == 6:
+                    expiry_date = datetime.strptime(expiry, "%y%m%d")
+                elif len(expiry) == 10:
+                    expiry_date = datetime.strptime(expiry, "%Y-%m-%d")
+                else:
+                    continue
+
+                days_to_expiry = (expiry_date - current_time).days
+                if days_to_expiry >= min_days:
+                    return expiry
+            except ValueError:
+                continue
+
+        # If no suitable expiry found, return the farthest one
+        return sorted(available_expiries)[-1] if available_expiries else None
+
+    def calculate_option_strike(
+        self,
+        pair: str,
+        option_type: str,
+        current_rate: float,
+        dataframe: DataFrame,
+        **kwargs,
+    ) -> float:
+        """
+        Calculate the strike price for an option contract.
+        Can be overridden to implement custom strike selection logic.
+
+        Default implementation:
+        - For CALL options: selects strike ~5% above current price (slightly OTM)
+        - For PUT options: selects strike ~5% below current price (slightly OTM)
+
+        :param pair: Underlying pair
+        :param option_type: 'call' or 'put'
+        :param current_rate: Current price of underlying
+        :param dataframe: Analyzed dataframe
+        :param **kwargs: Ensure to keep this here so updates to this won't break your strategy.
+        :return: Strike price as float
+        """
+        if option_type == "call":
+            # For calls, go slightly OTM (5% above current price)
+            return current_rate * 1.05
+        else:
+            # For puts, go slightly OTM (5% below current price)
+            return current_rate * 0.95
+
     def custom_stoploss(
         self,
         pair: str,

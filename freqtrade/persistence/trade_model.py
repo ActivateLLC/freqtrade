@@ -462,6 +462,20 @@ class LocalTrade:
     # Used to keep running funding fees - between the last filled order and now
     # Shall not be used for calculations!
     funding_fee_running: float | None = None
+
+    # Options properties
+    option_type: str | None = None  # 'call' or 'put'
+    strike_price: float | None = None
+    expiry_date: datetime | None = None
+    implied_volatility: float | None = None  # IV at entry
+    option_premium: float | None = None  # Premium paid/received
+    # Greeks
+    delta: float | None = None
+    gamma: float | None = None
+    theta: float | None = None
+    vega: float | None = None
+    rho: float | None = None
+
     # v 2 -> correct max_stake_amount calculation for leveraged trades
     record_version: int = 2
 
@@ -1734,6 +1748,19 @@ class Trade(ModelBase, LocalTrade):
     # Futures properties
     funding_fees: Mapped[float | None] = mapped_column(Float(), nullable=True, default=None)
     funding_fee_running: Mapped[float | None] = mapped_column(Float(), nullable=True, default=None)
+
+    # Options properties
+    option_type: Mapped[str | None] = mapped_column(String(10), nullable=True)
+    strike_price: Mapped[float | None] = mapped_column(Float(), nullable=True)
+    expiry_date: Mapped[datetime | None] = mapped_column(nullable=True)
+    implied_volatility: Mapped[float | None] = mapped_column(Float(), nullable=True)
+    option_premium: Mapped[float | None] = mapped_column(Float(), nullable=True)
+    # Greeks
+    delta: Mapped[float | None] = mapped_column(Float(), nullable=True)
+    gamma: Mapped[float | None] = mapped_column(Float(), nullable=True)
+    theta: Mapped[float | None] = mapped_column(Float(), nullable=True)
+    vega: Mapped[float | None] = mapped_column(Float(), nullable=True)
+    rho: Mapped[float | None] = mapped_column(Float(), nullable=True)
 
     record_version: Mapped[int] = mapped_column(Integer, nullable=False, default=2)
 
