@@ -478,6 +478,139 @@ class Okx(Exchange):
         except ccxt.BaseError as e:
             raise OperationalException(e) from e
 
+    @retrier
+    def create_batch_orders(self, orders: list[dict]) -> dict:
+        """
+        Create multiple orders simultaneously (useful for spreads).
+        Uses OKX batch-orders endpoint for atomic execution.
+
+        :param orders: List of order dictionaries, each containing:
+            - symbol: Option symbol
+            - type: Order type ('limit' or 'market')
+            - side: 'buy' or 'sell'
+            - amount: Number of contracts
+            - price: Limit price (optional for market orders)
+        :return: Batch order response from OKX
+        """
+        try:
+            # Format orders for OKX batch endpoint
+            okx_orders = []
+            for order in orders:
+                okx_order = {
+                    "instId": order["symbol"],
+                    "tdMode": "cash",  # Options use cash settlement
+                    "side": order["side"],
+                    "ordType": order.get("type", "limit"),
+                    "sz": str(order["amount"]),
+                }
+
+                if order.get("price"):
+                    okx_order["px"] = str(order["price"])
+
+                okx_orders.append(okx_order)
+
+            # Submit batch order
+            response = self._api.private_post_trade_batch_orders({"orders": okx_orders})
+            self._log_exchange_response("create_batch_orders", response)
+
+            return response
+
+        except ccxt.InsufficientFunds as e:
+            raise RetryableOrderError(
+                f"Insufficient funds for batch order on {self.name}. Message: {e}"
+            ) from e
+        except ccxt.InvalidOrder as e:
+            raise OperationalException(
+                f"Could not create batch order on {self.name}. Message: {e}"
+            ) from e
+        except ccxt.DDoSProtection as e:
+            raise DDosProtection(e) from e
+        except (ccxt.OperationFailed, ccxt.ExchangeError) as e:
+            raise TemporaryError(
+                f"Could not create batch order due to {e.__class__.__name__}. Message: {e}"
+            ) from e
+        except ccxt.BaseError as e:
+            raise OperationalException(e) from e
+
+    @retrier
+    def create_spread_order(
+        self,
+        leg1_symbol: str,
+        leg1_side: BuySell,
+        leg1_amount: float,
+        leg1_price: float | None,
+        leg2_symbol: str,
+        leg2_side: BuySell,
+        leg2_amount: float,
+        leg2_price: float | None,
+        order_type: str = "limit",
+    ) -> dict:
+        """
+        Create a two-legged spread order with atomic execution.
+
+        Both legs will be submitted simultaneously using OKX batch orders.
+        This reduces execution risk compared to sequential orders.
+
+        :param leg1_symbol: First leg option symbol
+        :param leg1_side: 'buy' or 'sell'
+        :param leg1_amount: Number of contracts for leg 1
+        :param leg1_price: Limit price for leg 1
+        :param leg2_symbol: Second leg option symbol
+        :param leg2_side: 'buy' or 'sell'
+        :param leg2_amount: Number of contracts for leg 2
+        :param leg2_price: Limit price for leg 2
+        :param order_type: 'limit' or 'market'
+        :return: Batch order response
+        """
+        orders = [
+            {
+                "symbol": leg1_symbol,
+                "side": leg1_side,
+                "amount": leg1_amount,
+                "price": leg1_price,
+                "type": order_type,
+            },
+            {
+                "symbol": leg2_symbol,
+                "side": leg2_side,
+                "amount": leg2_amount,
+                "price": leg2_price,
+                "type": order_type,
+            },
+        ]
+
+        logger.info(
+            f"Creating spread order: {leg1_side.upper()} {leg1_symbol} @ {leg1_price} | "
+            f"{leg2_side.upper()} {leg2_symbol} @ {leg2_price}"
+        )
+
+        return self.create_batch_orders(orders)
+
+    def cancel_batch_orders(self, order_ids: list[str], pair: str) -> dict:
+        """
+        Cancel multiple orders simultaneously.
+
+        :param order_ids: List of order IDs to cancel
+        :param pair: Trading pair
+        :return: Cancel response from OKX
+        """
+        try:
+            cancel_requests = [{"instId": pair, "ordId": oid} for oid in order_ids]
+
+            response = self._api.private_post_trade_cancel_batch_orders(cancel_requests)
+            self._log_exchange_response("cancel_batch_orders", response)
+
+            return response
+
+        except ccxt.DDoSProtection as e:
+            raise DDosProtection(e) from e
+        except (ccxt.OperationFailed, ccxt.ExchangeError) as e:
+            raise TemporaryError(
+                f"Could not cancel batch orders due to {e.__class__.__name__}. Message: {e}"
+            ) from e
+        except ccxt.BaseError as e:
+            raise OperationalException(e) from e
+
 
 class Myokx(Okx):
     """MyOkx exchange class.
